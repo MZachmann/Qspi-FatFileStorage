@@ -18,7 +18,7 @@ static const nrf_serial_flash_params_t m_sflash_params[] = {
     {    /*IC GD25Q32C*/
         .read_id = { 0xc2, 0x20, 0x16 },
         .capabilities = 0x00,
-        .size = 8 * 1024 * 1024, // only use half of it
+        .size = 2 * 1024 * 1024, // only use half of it
         .erase_size = 4 * 1024,
         .program_size = 256,
     }
