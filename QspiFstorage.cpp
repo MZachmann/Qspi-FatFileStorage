@@ -34,7 +34,7 @@ int QspiFstorage::Initialize(void)
 		if(frf == FR_OK)
 		{
 			_IsInitialized = true;
-			frf = Mount( );
+			frf = Mount(false);
 		}
 		return frf;
 	}
@@ -43,19 +43,32 @@ int QspiFstorage::Initialize(void)
 }
 
 // mount the flash chip as a filesystem. on failure create a new filesystem
-int QspiFstorage::Mount(void)
+int QspiFstorage::Mount(bool forceClear)
 {
-    static uint8_t buf[512];
     memset(&_Filesystem, 0, sizeof(FATFS));
-	FRESULT ff_result = f_mount(&_Filesystem, "", 1);
+	FRESULT ff_result = FR_NO_FILESYSTEM;
+
+	if( _IsMounted)
+	{
+		f_mount(NULL, "", 1);	// mounting NULL clears the mount
+		_IsMounted = false;
+	}
+
+	if(!forceClear)
+		ff_result = f_mount(&_Filesystem, "", 1);
+		
 	if(ff_result == FR_NO_FILESYSTEM)
 	{
-		ff_result = f_mkfs("", FM_FAT, 1024, buf, sizeof(buf));
-		if (ff_result != FR_OK)
+        UINT sizebuf = 512;
+		// there's no reason to static allocate something we use once
+		// so, temporary formatting buffer
+      	void* buf = malloc(sizebuf);
+		ff_result = f_mkfs("", FM_FAT, 1024,  (uint8_t*)buf, sizebuf);
+		if (ff_result == FR_OK)
 		{
-			return ff_result;
+			ff_result = f_mount(&_Filesystem, "", 1);
 		}
-		ff_result = f_mount(&_Filesystem, "", 1);
+		free(buf);
 	}
 
 	_IsMounted = (ff_result == 0);
@@ -68,6 +81,7 @@ void QspiFstorage::Uninitialize(void)
 	if( _IsMounted)
 		f_mount(NULL, "", 1);	// mounting NULL clears the mount
 	QspiF_Uninitialize();
+    _IsInitialized = false;
 }
 
 // list a folder in the filesystem
@@ -114,11 +128,11 @@ void QspiFstorage::Ls(const char* folder)
 // write a file from a string
 int QspiFstorage::WriteFile(const char* filename, const String& stext)
 {
-  return WriteFile(filename, (const uint8_t* )(stext.c_str()), stext.length());
+  return WriteFileN(filename, (const uint8_t* )(stext.c_str()), stext.length());
 }
 
 // write a file from a buffer
-int QspiFstorage::WriteFile(const char* filename, const uint8_t* text, uint16_t count)
+int QspiFstorage::WriteFileN(const char* filename, const uint8_t* text, uint16_t count)
 {
 FIL file;
 size_t nout = 0;
@@ -144,6 +158,7 @@ FIL file;
 size_t nout = 0;
 FILINFO finf;
 
+	// note this uses a bunch of stack space and stack=2K was failing...
 	FRESULT frf = f_stat(filename, &finf);
 	if( frf == FR_OK && finf.fsize > 0)
 	{
@@ -151,8 +166,8 @@ FILINFO finf;
 		char* bfr = (char*)malloc(fileamt);
 		if(bfr)
 		{
-			memset(bfr, 0, fileamt);
-			ReadFile(filename, (uint8_t*)bfr, finf.fsize);	// ignore result?
+			memset(bfr, 0, fileamt);	// init and null terminate
+			ReadFileN(filename, (uint8_t*)bfr, finf.fsize);	// ignore result?
 			*pstext = bfr;
 			free(bfr);
 		}
@@ -165,15 +180,15 @@ FILINFO finf;
 }
 
 // read a file into a buffer, return # bytes read
-int QspiFstorage::ReadFile(const char* filename, uint8_t* buffer, uint16_t bufmax)
+int QspiFstorage::ReadFileN(const char* filename, uint8_t* buffer, uint16_t bufmax)
 {
 FIL file;
-size_t nout = 0;
+UINT nout = 0;
 
 	FRESULT frf = f_open(&file, filename, FA_READ);
 	if(frf == FR_OK)
 	{
-		frf = f_read(&file, buffer, bufmax, &nout);
+		frf = f_read(&file, buffer, (UINT)bufmax, &nout);
 		FRESULT frc = f_close(&file);
 		if(frf == FR_OK)
 			frf = frc;	// if the read worked, get the close result
